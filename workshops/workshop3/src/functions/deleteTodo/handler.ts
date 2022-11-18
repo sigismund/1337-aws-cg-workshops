@@ -11,8 +11,6 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 export const handler = async function (
   event: APIGatewayProxyEvent,
 ): Promise<APIGatewayProxyResult> {
-  console.log(event);
-
   const todoId = event.pathParameters?.todoId;
 
   try {
@@ -25,7 +23,7 @@ export const handler = async function (
         ConditionExpression: 'attribute_exists(todoId)',
       }),
     );
-  } catch (err) {
+  } catch (err: any) {
     if (err instanceof ConditionalCheckFailedException) {
       return {
         statusCode: 404,
@@ -38,6 +36,7 @@ export const handler = async function (
     }
   }
 
+  console.log(`Todo ${todoId} deleted successfully`);
   return {
     statusCode: 204,
     body: '',

@@ -4,26 +4,30 @@ import {
   NodejsFunction,
   NodejsFunctionProps,
 } from 'aws-cdk-lib/aws-lambda-nodejs';
-import {Table, AttributeType, BillingMode, StreamViewType} from 'aws-cdk-lib/aws-dynamodb';
+import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import {
+  Table,
+  AttributeType,
+  BillingMode,
+  StreamViewType,
+} from 'aws-cdk-lib/aws-dynamodb';
 import { RestApi, LambdaIntegration } from 'aws-cdk-lib/aws-apigateway';
-import {Runtime, StartingPosition} from 'aws-cdk-lib/aws-lambda';
-import {DynamoEventSource} from "aws-cdk-lib/aws-lambda-event-sources";
-import {EventBus, Rule} from "aws-cdk-lib/aws-events";
-import {LambdaFunction} from "aws-cdk-lib/aws-events-targets";
-import { Topic } from "aws-cdk-lib/aws-sns";
-import { EmailSubscription } from "aws-cdk-lib/aws-sns-subscriptions";
-
+import { Runtime, StartingPosition } from 'aws-cdk-lib/aws-lambda';
+import { EventBus, Rule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
+import { Topic } from 'aws-cdk-lib/aws-sns';
+import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
 
 export class TodoAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
 
-    // SNS Topic
-    const topic = new Topic(this, "TodoEventTopic");
-    topic.addSubscription(new EmailSubscription("ziga.drnovscek@gmail.com"));
-
     // EventBridge bus
-    const bus = new EventBus(this, "TodoEventBus");
+    const bus = new EventBus(this, 'TodoEventBus');
+
+    // SNS Topic
+    const topic = new Topic(this, 'TodoEventTopic');
+    topic.addSubscription(new EmailSubscription('elias.brange@gmail.com'));
 
     // DynamoDB Table
     const table = new Table(this, 'TodoTable', {
@@ -32,16 +36,15 @@ export class TodoAppStack extends cdk.Stack {
         type: AttributeType.STRING,
       },
       billingMode: BillingMode.PAY_PER_REQUEST,
-      stream: StreamViewType.NEW_AND_OLD_IMAGES, // add this line
+      stream: StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecovery: true,
     });
 
     // Lambda Functions
     const commonFunctionProps: NodejsFunctionProps = {
-      handler: "handler",
+      handler: 'handler',
       runtime: Runtime.NODEJS_16_X,
       memorySize: 1024,
-      timeout: cdk.Duration.seconds(60),
       bundling: {
         minify: true,
       },
@@ -54,12 +57,11 @@ export class TodoAppStack extends cdk.Stack {
       },
     };
 
-    const getFunction = new NodejsFunction(this, "GetTodoFunction", {
-      entry: "functions/getTodo/handler.ts",
+    const getFunction = new NodejsFunction(this, 'GetTodoFunction', {
+      entry: 'functions/getTodo/handler.ts',
       ...commonFunctionProps,
       ...apiFunctionProps,
     });
-
     const listFunction = new NodejsFunction(this, 'ListTodoFunction', {
       entry: 'functions/listTodos/handler.ts',
       ...commonFunctionProps,
@@ -80,60 +82,43 @@ export class TodoAppStack extends cdk.Stack {
       ...commonFunctionProps,
       ...apiFunctionProps,
     });
-
-    const todoCreatedFunction = new NodejsFunction(this, "TodoCreatedFunction", {
-      entry: "functions/todoCreatedEvent/handler.ts",
+    const streamFunction = new NodejsFunction(this, 'StreamFunction', {
+      entry: 'functions/stream/handler.ts',
       ...commonFunctionProps,
-    });
-
-    const todoCompletedFunction = new NodejsFunction(this, "TodoCompletedFunction", {
-      entry: "functions/todoCompletedEvent/handler.ts",
-      ...commonFunctionProps,
-      environment: {
-        TOPIC_ARN: topic.topicArn,
-      },
-    });
-
-    const todoDeletedFunction = new NodejsFunction(this, "TodoDeletedFunction", {
-      entry: "functions/todoDeletedEvent/handler.ts",
-      ...commonFunctionProps,
-    });
-
-    const streamFunction = new NodejsFunction(this, "StreamFunction", {
-      entry: "functions/stream/handler.ts",
-      ...commonFunctionProps,
+      timeout: cdk.Duration.seconds(60),
       environment: {
         EVENT_BUS_NAME: bus.eventBusName,
       },
-      // api props not needed here
     });
-
-    // EventBridge integrations
-    new Rule(this, "TodoCreatedRule", {
-      eventBus: bus,
-      eventPattern: { detailType: ["TodoCreated"] },
-      targets: [new LambdaFunction(todoCreatedFunction)],
-    });
-
-    new Rule(this, "TodoCompletedRule", {
-      eventBus: bus,
-      eventPattern: { detailType: ["TodoCompleted"] },
-      targets: [new LambdaFunction(todoCompletedFunction)],
-    });
-
-    new Rule(this, "TodoDeletedRule", {
-      eventBus: bus,
-      eventPattern: { detailType: ["TodoDeleted"] },
-      targets: [new LambdaFunction(todoDeletedFunction)],
-    });
-
-    // DynamoDB stream integration
-    streamFunction.addEventSource(
-        new DynamoEventSource(table, {
-          startingPosition: StartingPosition.TRIM_HORIZON,
-          batchSize: 10,
-          retryAttempts: 3,
-        })
+    const todoCreatedFunction = new NodejsFunction(
+      this,
+      'TodoCreatedFunction',
+      {
+        entry: 'functions/todoCreatedEvent/handler.ts',
+        ...commonFunctionProps,
+        timeout: cdk.Duration.seconds(60),
+      },
+    );
+    const todoCompletedFunction = new NodejsFunction(
+      this,
+      'TodoCompletedFunction',
+      {
+        entry: 'functions/todoCompletedEvent/handler.ts',
+        ...commonFunctionProps,
+        timeout: cdk.Duration.seconds(60),
+        environment: {
+          TOPIC_ARN: topic.topicArn,
+        },
+      },
+    );
+    const todoDeletedFunction = new NodejsFunction(
+      this,
+      'TodoDeletedFunction',
+      {
+        entry: 'functions/todoDeletedEvent/handler.ts',
+        ...commonFunctionProps,
+        timeout: cdk.Duration.seconds(60),
+      },
     );
 
     // Add Lambda runtime permissions
@@ -142,10 +127,7 @@ export class TodoAppStack extends cdk.Stack {
     table.grantWriteData(createFunction);
     table.grantWriteData(updateFunction);
     table.grantWriteData(deleteFunction);
-
-    // Grant stream function put permissions for EventBus
     bus.grantPutEventsTo(streamFunction);
-
     topic.grantPublish(todoCompletedFunction);
 
     // REST API
@@ -159,5 +141,33 @@ export class TodoAppStack extends cdk.Stack {
     todo.addMethod('GET', new LambdaIntegration(getFunction));
     todo.addMethod('PATCH', new LambdaIntegration(updateFunction));
     todo.addMethod('DELETE', new LambdaIntegration(deleteFunction));
+
+    // DynamoDB stream integration
+    streamFunction.addEventSource(
+      new DynamoEventSource(table, {
+        startingPosition: StartingPosition.TRIM_HORIZON,
+        batchSize: 10,
+        retryAttempts: 3,
+      }),
+    );
+
+    // EventBridge integrations
+    new Rule(this, 'TodoCreatedRule', {
+      eventBus: bus,
+      eventPattern: { detailType: ['todoCreated'] },
+      targets: [new LambdaFunction(todoCreatedFunction)],
+    });
+
+    new Rule(this, 'TodoCompletedRule', {
+      eventBus: bus,
+      eventPattern: { detailType: ['todoCompleted'] },
+      targets: [new LambdaFunction(todoCompletedFunction)],
+    });
+
+    new Rule(this, 'TodoDeletedRule', {
+      eventBus: bus,
+      eventPattern: { detailType: ['todoDeleted'] },
+      targets: [new LambdaFunction(todoDeletedFunction)],
+    });
   }
 }
