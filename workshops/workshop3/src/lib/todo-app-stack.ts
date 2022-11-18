@@ -4,7 +4,7 @@ import {
   NodejsFunction,
   NodejsFunctionProps,
 } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { DynamoEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import { DynamoEventSource, SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import {
   Table,
   AttributeType,
@@ -17,6 +17,9 @@ import { EventBus, Rule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction } from 'aws-cdk-lib/aws-events-targets';
 import { Topic } from 'aws-cdk-lib/aws-sns';
 import { EmailSubscription } from 'aws-cdk-lib/aws-sns-subscriptions';
+import { Queue } from 'aws-cdk-lib/aws-sqs';
+import { Bucket, EventType } from "aws-cdk-lib/aws-s3"; // add EventType to this import
+import { LambdaDestination } from "aws-cdk-lib/aws-s3-notifications";
 
 export class TodoAppStack extends cdk.Stack {
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
@@ -27,7 +30,7 @@ export class TodoAppStack extends cdk.Stack {
 
     // SNS Topic
     const topic = new Topic(this, 'TodoEventTopic');
-    topic.addSubscription(new EmailSubscription('elias.brange@gmail.com'));
+    topic.addSubscription(new EmailSubscription('ziga.drnovscek@1337.tech'));
 
     // DynamoDB Table
     const table = new Table(this, 'TodoTable', {
@@ -38,6 +41,14 @@ export class TodoAppStack extends cdk.Stack {
       billingMode: BillingMode.PAY_PER_REQUEST,
       stream: StreamViewType.NEW_AND_OLD_IMAGES,
       pointInTimeRecovery: true,
+    });
+
+    // S3 Bucket
+    const bucket = new Bucket(this, 'TodoImportBucket');
+
+    // Import Queue
+    const queue = new Queue(this, 'TodoImportQueue', {
+      visibilityTimeout: cdk.Duration.seconds(120),
     });
 
     // Lambda Functions
@@ -120,6 +131,24 @@ export class TodoAppStack extends cdk.Stack {
         timeout: cdk.Duration.seconds(60),
       },
     );
+    const s3ToSqsFunction = new NodejsFunction(this, "S3ToSqsFunction", {
+      entry: "functions/s3ToSqs/handler.ts",
+      ...commonFunctionProps,
+      timeout: cdk.Duration.seconds(900),
+      environment: {
+        QUEUE_URL: queue.queueUrl,
+        BUCKET_NAME: bucket.bucketName,
+      },
+    });
+
+    const sqsToDynamo = new NodejsFunction(this, "SqsToDynamoFunction", {
+      entry: "functions/sqsToDynamo/handler.ts",
+      ...commonFunctionProps,
+      timeout: cdk.Duration.seconds(60),
+      environment: {
+        TABLE_NAME: table.tableName,
+      },
+    });
 
     // Add Lambda runtime permissions
     table.grantReadData(getFunction);
@@ -127,8 +156,20 @@ export class TodoAppStack extends cdk.Stack {
     table.grantWriteData(createFunction);
     table.grantWriteData(updateFunction);
     table.grantWriteData(deleteFunction);
+    table.grantWriteData(sqsToDynamo);
     bus.grantPutEventsTo(streamFunction);
     topic.grantPublish(todoCompletedFunction);
+    // Lambda access to S3
+    bucket.grantRead(s3ToSqsFunction);
+    // Lambda access to SQS
+    queue.grantSendMessages(s3ToSqsFunction);
+
+    // S3 integration
+    bucket.addEventNotification(
+        EventType.OBJECT_CREATED,
+        new LambdaDestination(s3ToSqsFunction),
+        { prefix: "import/" }
+    );
 
     // REST API
     const restApi = new RestApi(this, 'RestApi', {});
@@ -151,6 +192,13 @@ export class TodoAppStack extends cdk.Stack {
       }),
     );
 
+    // SQS integration
+    sqsToDynamo.addEventSource(
+        new SqsEventSource(queue, {
+          batchSize: 5,
+        })
+    );
+
     // EventBridge integrations
     new Rule(this, 'TodoCreatedRule', {
       eventBus: bus,
@@ -168,6 +216,11 @@ export class TodoAppStack extends cdk.Stack {
       eventBus: bus,
       eventPattern: { detailType: ['todoDeleted'] },
       targets: [new LambdaFunction(todoDeletedFunction)],
+    });
+
+    // Outputs
+    new cdk.CfnOutput(this, 'TodoImportBucketOutput', {
+      value: bucket.bucketName,
     });
   }
 }
