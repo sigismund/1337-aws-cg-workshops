@@ -8,6 +8,8 @@ const client = DynamoDBDocumentClient.from(new DynamoDBClient({}));
 
 type SqsRecord = {
     name: string;
+    completed: boolean;
+    id: string|null;
 };
 
 export const handler = async function (event: SQSEvent): Promise<void> {
@@ -21,9 +23,9 @@ export const handler = async function (event: SQSEvent): Promise<void> {
         const timestamp = new Date().getTime();
 
         const item = {
-            todoId: uuidv4(),
+            todoId: todo.id ? todo.id : uuidv4(),
             name: todo.name,
-            completed: false,
+            completed: todo.completed,
             createdAt: timestamp,
             updatedAt: timestamp,
         };

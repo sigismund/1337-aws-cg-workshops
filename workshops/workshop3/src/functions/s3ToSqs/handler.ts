@@ -11,6 +11,8 @@ const s3Client = new S3Client({});
 // This should match the structure of your CSV file
 type CsvRow = {
     name: string;
+    id: string|null;
+    completed: boolean;
 };
 
 export const handler = async function (event: S3Event): Promise<void> {
